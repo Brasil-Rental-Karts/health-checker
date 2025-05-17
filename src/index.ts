@@ -14,17 +14,25 @@ const PORT = 3000;
 const DATA_FILE = path.join(__dirname, '../data/servers.json');
 const START_TIME = new Date();
 
-// Get password from environment variables
-const APP_PASSWORD = process.env.APP_PASSWORD || 'securemonitor123';
+// Get password from environment variables and trim any whitespace
+const APP_PASSWORD = (process.env.APP_PASSWORD || 'securemonitor123').trim();
+
+// Log the loaded password (for debugging)
+console.log('Environment loaded. APP_PASSWORD length:', APP_PASSWORD.length);
+console.log('NODE_ENV:', process.env.NODE_ENV);
 
 // Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 app.use(session({
   secret: 'server-health-monitor-secret',
-  resave: false,
-  saveUninitialized: false,
-  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+  resave: true,
+  saveUninitialized: true,
+  cookie: { 
+    secure: false, // Set to false for local development
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
 }));
 
 // Authentication middleware
@@ -54,6 +62,10 @@ app.use(requireAuth);
 // Login route
 app.post('/login', (req, res) => {
   const { password } = req.body;
+  
+  console.log('Login attempt - Received password:', password);
+  console.log('Expected password:', APP_PASSWORD);
+  console.log('Password match:', password === APP_PASSWORD);
   
   if (password === APP_PASSWORD) {
     if (req.session) {

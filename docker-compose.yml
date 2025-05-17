@@ -1,3 +1,4 @@
+version: '3'
 services:
   app:
     build: .
@@ -5,6 +6,8 @@ services:
       - "3000:3000"
     volumes:
       - ./data:/usr/src/app/data
+      - ./sessions:/usr/src/app/sessions
     restart: unless-stopped
     environment:
-      - NODE_ENV=production 
+      - NODE_ENV=production
+      - APP_PASSWORD=#race4fun 
