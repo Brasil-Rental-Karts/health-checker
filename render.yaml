@@ -11,6 +11,6 @@ services:
         value: production
       - key: APP_PASSWORD
         # This is a placeholder - set a real password in Render dashboard
-        value: securemonitor123
+        value: "#race4fun"
         # For real production use, use a secret
         # sync: false 

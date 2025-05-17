@@ -21,7 +21,7 @@ RUN mkdir -p data
 # Set environment variables
 ENV NODE_ENV=production
 # Default password (override during deployment)
-ENV APP_PASSWORD=securemonitor123
+ENV APP_PASSWORD=#race4fun
 
 # Expose port
 EXPOSE 3000
