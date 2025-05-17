@@ -1,17 +1,84 @@
 import fs from 'fs';
 import path from 'path';
 import express from 'express';
+import session from 'express-session';
 import { startHealthCheckScheduler, checkServerHealth, setCheckInterval } from './healthChecker';
 import { Server } from './types';
+import dotenv from 'dotenv';
+
+// Load environment variables
+dotenv.config();
 
 const app = express();
 const PORT = 3000;
 const DATA_FILE = path.join(__dirname, '../data/servers.json');
 const START_TIME = new Date();
 
+// Get password from environment variables
+const APP_PASSWORD = process.env.APP_PASSWORD || 'securemonitor123';
+
 // Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
+app.use(session({
+  secret: 'server-health-monitor-secret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { secure: process.env.NODE_ENV === 'production', maxAge: 24 * 60 * 60 * 1000 } // 24 hours
+}));
+
+// Authentication middleware
+const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  // Skip auth for health check and login endpoints
+  if (req.path === '/health' || req.path === '/login' || req.path === '/login.html') {
+    return next();
+  }
+  
+  // Skip auth for API requests that have valid auth
+  if (req.session && req.session.authenticated) {
+    return next();
+  }
+  
+  // If accessing the main page and not authenticated, redirect to login
+  if (req.path === '/' || req.path === '/index.html') {
+    return res.redirect('/login.html');
+  }
+  
+  // For API requests without auth, return 401
+  res.status(401).json({ error: 'Authentication required' });
+};
+
+// Apply auth middleware to all routes
+app.use(requireAuth);
+
+// Login route
+app.post('/login', (req, res) => {
+  const { password } = req.body;
+  
+  if (password === APP_PASSWORD) {
+    if (req.session) {
+      req.session.authenticated = true;
+    }
+    res.status(200).json({ success: true });
+  } else {
+    res.status(401).json({ error: 'Invalid password' });
+  }
+});
+
+// Logout route
+app.post('/logout', (req, res) => {
+  if (req.session) {
+    req.session.destroy((err) => {
+      if (err) {
+        res.status(500).json({ error: 'Failed to logout' });
+      } else {
+        res.status(200).json({ success: true });
+      }
+    });
+  } else {
+    res.status(200).json({ success: true });
+  }
+});
 
 // Health endpoint
 app.get('/health', (req, res) => {
@@ -206,6 +273,15 @@ app.post('/api/config', (req, res) => {
   } catch (error) {
     console.error('Config update error:', error);
     res.status(500).json({ error: 'Failed to update configuration' });
+  }
+});
+
+// Authentication check endpoint
+app.get('/api/auth/check', (req, res) => {
+  if (req.session && req.session.authenticated) {
+    res.status(200).json({ authenticated: true });
+  } else {
+    res.status(401).json({ authenticated: false });
   }
 });
 

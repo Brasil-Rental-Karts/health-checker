@@ -18,6 +18,11 @@ RUN npm run build
 # Create data directory if it doesn't exist
 RUN mkdir -p data
 
+# Set environment variables
+ENV NODE_ENV=production
+# Default password (override during deployment)
+ENV APP_PASSWORD=securemonitor123
+
 # Expose port
 EXPOSE 3000
 

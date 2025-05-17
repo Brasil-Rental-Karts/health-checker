@@ -5,8 +5,35 @@ document.addEventListener('DOMContentLoaded', () => {
   const serversContainer = document.getElementById('servers-container');
   const refreshTimeSelect = document.getElementById('refresh-time');
   const saveSettingsButton = document.getElementById('save-settings');
-  const applyToServerButton = document.getElementById('apply-to-server');
   const settingsMessage = document.getElementById('settings-message');
+  const logoutButton = document.getElementById('logout-btn');
+  
+  // Logout functionality
+  logoutButton.addEventListener('click', async () => {
+    try {
+      logoutButton.disabled = true;
+      logoutButton.textContent = 'Logging out...';
+      
+      const response = await fetch('/logout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.ok) {
+        window.location.href = '/login.html';
+      } else {
+        console.error('Logout failed');
+        logoutButton.disabled = false;
+        logoutButton.textContent = 'Logout';
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+      logoutButton.disabled = false;
+      logoutButton.textContent = 'Logout';
+    }
+  });
   
   // Default refresh interval in milliseconds (5 minutes)
   let refreshInterval = 5 * 60 * 1000;
@@ -19,43 +46,22 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshInterval = parseInt(savedTime) * 60 * 1000; // Convert minutes to milliseconds
   }
   
-  // Save settings button click
-  saveSettingsButton.addEventListener('click', () => {
+  // Save and apply settings button click
+  saveSettingsButton.addEventListener('click', async () => {
     const newRefreshTime = refreshTimeSelect.value;
     
-    // Save to localStorage
-    localStorage.setItem('refreshTime', newRefreshTime);
-    
-    // Update refresh interval
-    refreshInterval = parseInt(newRefreshTime) * 60 * 1000; // Convert minutes to milliseconds
-    
-    // Restart the timer with the new interval
-    if (refreshTimerId) {
-      clearInterval(refreshTimerId);
-    }
-    refreshTimerId = setInterval(loadServers, refreshInterval);
-    
-    // Show success message
-    settingsMessage.textContent = `Refresh interval updated to ${newRefreshTime} minute${newRefreshTime === "1" ? "" : "s"}`;
-    settingsMessage.className = 'success-message';
-    
-    // Clear message after 3 seconds
-    setTimeout(() => {
-      settingsMessage.textContent = '';
-    }, 3000);
-  });
-  
-  // Apply to server button click
-  applyToServerButton.addEventListener('click', async () => {
-    const newCheckInterval = refreshTimeSelect.value;
+    // Show loading state
+    saveSettingsButton.disabled = true;
+    saveSettingsButton.textContent = 'Applying...';
     
     try {
+      // 1. First apply to server
       const response = await fetch('/api/config', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ checkInterval: parseInt(newCheckInterval) })
+        body: JSON.stringify({ checkInterval: parseInt(newRefreshTime) })
       });
       
       if (!response.ok) {
@@ -63,17 +69,33 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(data.error || 'Failed to update server configuration');
       }
       
+      // 2. Then save to localStorage
+      localStorage.setItem('refreshTime', newRefreshTime);
+      
+      // 3. Update client-side refresh interval
+      if (refreshTimerId) {
+        clearInterval(refreshTimerId);
+      }
+      refreshInterval = parseInt(newRefreshTime) * 60 * 1000;
+      refreshTimerId = setInterval(loadServers, refreshInterval);
+      
       // Show success message
-      settingsMessage.textContent = `Server check interval updated to ${newCheckInterval} minute${newCheckInterval === "1" ? "" : "s"}`;
+      settingsMessage.textContent = `Updated to ${newRefreshTime} minute${newRefreshTime === "1" ? "" : "s"} refresh`;
       settingsMessage.className = 'success-message';
       
       // Clear message after 3 seconds
       setTimeout(() => {
         settingsMessage.textContent = '';
       }, 3000);
+      
     } catch (error) {
+      // Show error message
       settingsMessage.textContent = error.message;
       settingsMessage.className = 'error-message';
+    } finally {
+      // Reset button state
+      saveSettingsButton.disabled = false;
+      saveSettingsButton.textContent = 'Save & Apply';
     }
   });
 
@@ -88,6 +110,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const url = serverUrlInput.value.trim();
     
     try {
+      // Show loading state on button
+      const submitButton = serverForm.querySelector('button[type="submit"]');
+      const originalText = submitButton.textContent;
+      submitButton.disabled = true;
+      submitButton.textContent = 'Adding...';
+      
       const response = await fetch('/api/servers', {
         method: 'POST',
         headers: {
@@ -105,8 +133,14 @@ document.addEventListener('DOMContentLoaded', () => {
       // Clear input and reload servers
       serverUrlInput.value = '';
       loadServers();
+      
     } catch (error) {
       addErrorElement.textContent = error.message;
+    } finally {
+      // Reset button state
+      const submitButton = serverForm.querySelector('button[type="submit"]');
+      submitButton.disabled = false;
+      submitButton.textContent = 'Add Server';
     }
   });
 
@@ -183,8 +217,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Function to remove a server
   async function removeServer(e) {
     const serverId = e.target.getAttribute('data-id');
+    const button = e.target;
     
     try {
+      // Show loading state
+      button.disabled = true;
+      button.textContent = 'Removing...';
+      
       const response = await fetch(`/api/servers/${serverId}`, {
         method: 'DELETE'
       });
@@ -198,6 +237,9 @@ document.addEventListener('DOMContentLoaded', () => {
       loadServers();
     } catch (error) {
       alert(`Error: ${error.message}`);
+      // Reset button state on error
+      button.disabled = false;
+      button.textContent = 'Remove';
     }
   }
 
