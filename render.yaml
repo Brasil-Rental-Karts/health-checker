@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: server-health-monitor
+    env: docker
+    plan: free
+    region: oregon
+    branch: main
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production 

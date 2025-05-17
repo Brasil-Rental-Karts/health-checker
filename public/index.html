@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Server Health Monitor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Server Health Monitor</h1>
+    </header>
+    
+    <section class="add-server">
+      <h2>Add New Server</h2>
+      <form id="add-server-form">
+        <div class="form-group">
+          <input type="url" id="server-url" placeholder="Enter server URL (e.g., https://example.com)" required>
+          <button type="submit">Add Server</button>
+        </div>
+        <div id="add-error" class="error-message"></div>
+      </form>
+    </section>
+    
+    <section class="settings">
+      <h2>Settings</h2>
+      <div class="form-group">
+        <label for="refresh-time">Check interval:</label>
+        <select id="refresh-time">
+          <option value="1">1 minute</option>
+          <option value="5" selected>5 minutes</option>
+          <option value="8">8 minutes</option>
+          <option value="10">10 minutes</option>
+        </select>
+        <button id="save-settings">Save</button>
+        <button id="apply-to-server" title="Apply this setting to the server health check interval">Apply to Server</button>
+      </div>
+      <div id="settings-message" class="success-message"></div>
+    </section>
+    
+    <section class="server-list">
+      <h2>Monitored Servers</h2>
+      <div id="servers-container">
+        <div class="loading">Loading servers...</div>
+      </div>
+    </section>
+  </div>
+  
+  <script src="app.js"></script>
+</body>
+</html>

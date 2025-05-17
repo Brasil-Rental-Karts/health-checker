@@ -1,0 +1,10 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/usr/src/app/data
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production 
