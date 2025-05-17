@@ -38,33 +38,37 @@
   </script>
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>Server Health Monitor</h1>
-      <button id="logout-btn" class="logout-btn">Logout</button>
+  <div class="dashboard-container">
+    <header class="dashboard-header">
+      <div class="header-content">
+        <h1>Server Health Monitor</h1>
+        <button id="logout-btn" class="logout-btn">Logout</button>
+      </div>
     </header>
     
-    <section class="add-server">
-      <h2>Add New Server</h2>
-      <form id="add-server-form">
-        <div class="form-group">
-          <input type="url" id="server-url" placeholder="Enter server URL" required>
-          <button type="submit">Add Server</button>
+    <main class="dashboard-main">
+      <section class="add-server">
+        <h2>Add New Server</h2>
+        <form id="add-server-form">
+          <div class="form-group">
+            <input type="url" id="server-url" placeholder="Enter server URL" required>
+            <button type="submit">Add Server</button>
+          </div>
+          <div id="add-error" class="error-message"></div>
+        </form>
+      </section>
+      
+      <!-- Settings section removed - using fixed 10 minute interval -->
+      
+      <section class="server-list">
+        <h2>Monitored Servers</h2>
+        <div id="servers-container">
+          <div class="loading">Loading servers...</div>
         </div>
-        <div id="add-error" class="error-message"></div>
-      </form>
-    </section>
-    
-    <!-- Settings section removed - using fixed 10 minute interval -->
-    
-    <section class="server-list">
-      <h2>Monitored Servers</h2>
-      <div id="servers-container">
-        <div class="loading">Loading servers...</div>
-      </div>
-    </section>
+      </section>
+    </main>
 
-    <footer>
+    <footer class="dashboard-footer">
       <p>© 2025 Server Health Monitor</p>
     </footer>
   </div>

@@ -34,20 +34,62 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-.container {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: var(--spacing-lg);
-  width: 100%;
-}
-
-header {
-  margin-bottom: var(--spacing-lg);
-  text-align: center;
-  position: relative;
+/* Dashboard Layout */
+.dashboard-container {
   display: flex;
   flex-direction: column;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--spacing-md);
+}
+
+.dashboard-header {
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  background-color: var(--bg-secondary);
+  border-radius: var(--border-radius);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
+  position: relative;
+}
+
+.logout-btn {
+  position: absolute;
+  right: var(--spacing-md);
+  top: 50%;
+  transform: translateY(-50%);
+  background-color: transparent;
+  color: var(--text-secondary);
+  border: none;
+  min-width: unset;
+  padding: var(--spacing-sm);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  opacity: 0.8;
+  transition: var(--transition);
+}
+
+.logout-btn:hover {
+  opacity: 1;
+  color: var(--danger-color);
+  background-color: transparent;
+  transform: translateY(-50%) scale(1.05);
+}
+
+.dashboard-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
 }
 
 h1 {
@@ -142,15 +184,29 @@ button:disabled {
   opacity: 0.7;
 }
 
+/* Trash icon button */
 button.remove {
-  background-color: var(--danger-color);
-  padding: 8px 12px;
-  font-size: 14px;
+  background-color: transparent;
+  color: var(--danger-color);
+  padding: 8px;
+  font-size: 16px;
   min-width: unset;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 button.remove:hover {
-  background-color: #dc2626;
+  color: #dc2626;
+  background-color: rgba(239, 68, 68, 0.1);
+  transform: scale(1.1);
+}
+
+/* Trash icon */
+.trash-icon {
+  width: 16px;
+  height: 16px;
 }
 
 /* Settings button styles removed */
@@ -167,25 +223,77 @@ button.remove:hover {
   font-size: 14px;
 }
 
+/* Card Grid Layout */
+#servers-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--spacing-md);
+  width: 100%;
+}
+
 .server-item {
   display: flex;
   flex-direction: column;
   padding: var(--spacing-md);
-  margin-bottom: var(--spacing-md);
   border-radius: var(--border-radius);
-  background-color: var(--bg-card);
+  background-color: #000000;
   transition: var(--transition);
   animation: fadeIn 0.3s ease-out;
   position: relative;
+  height: 100%;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  border: 2px solid #666666;
 }
 
-.server-item:last-child {
-  margin-bottom: 0;
+.server-item.status-healthy {
+  border-color: var(--success-color);
+}
+
+.server-item.status-unhealthy {
+  border-color: var(--danger-color);
+}
+
+.server-item.status-unknown {
+  border-color: #666666;
 }
 
 .server-info {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   margin-bottom: var(--spacing-md);
+}
+
+.server-status {
+  display: flex;
+  align-items: center;
+  margin: 10px 0;
+  font-size: 1rem;
+}
+
+.status-indicator {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 8px;
+}
+
+.last-checked {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+.last-checked-label {
+  font-weight: 500;
+}
+
+.last-checked-time {
+  margin-top: 2px;
 }
 
 .server-url {
@@ -216,19 +324,6 @@ button.remove:hover {
   height: 10px;
   border-radius: 50%;
   margin-right: var(--spacing-sm);
-}
-
-.status-healthy {
-  background-color: var(--success-color);
-  animation: pulse 2s infinite;
-}
-
-.status-unhealthy {
-  background-color: var(--danger-color);
-}
-
-.status-unknown {
-  background-color: var(--warning-color);
 }
 
 .last-checked {
@@ -298,13 +393,42 @@ button.remove:hover {
   }
 }
 
-/* Adding footer styles */
-footer {
+.dashboard-footer {
   margin-top: var(--spacing-lg);
   text-align: center;
   color: var(--text-secondary);
-  font-size: 14px;
-  padding: var(--spacing-md) 0;
+  font-size: 0.9rem;
+  padding: var(--spacing-md);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  #servers-container {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+  
+  .header-content {
+    flex-direction: column;
+    gap: var(--spacing-md);
+  }
+  
+  h1 {
+    margin-bottom: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  #servers-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .form-group {
+    flex-direction: column;
+  }
+  
+  button {
+    width: 100%;
+  }
 }
 
 /* Add some polish to card hover */
@@ -327,20 +451,3 @@ footer {
 }
 
 /* Header and logout button */
-.logout-btn {
-  background-color: var(--bg-secondary);
-  color: var(--text-secondary);
-  border: 1px solid #333;
-  position: absolute;
-  top: 0;
-  right: 0;
-  font-size: 14px;
-  padding: 8px 12px;
-  min-width: unset;
-}
-
-.logout-btn:hover {
-  background-color: var(--danger-color);
-  color: white;
-  border-color: var(--danger-color);
-}
