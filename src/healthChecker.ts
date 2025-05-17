@@ -4,81 +4,13 @@ import path from 'path';
 import { Server, ServerStatus } from './types';
 
 const DATA_FILE = path.join(__dirname, '../data/servers.json');
-const CONFIG_FILE = path.join(__dirname, '../data/config.json');
-let CHECK_INTERVAL = 5 * 60 * 1000; // Default: 5 minutes in milliseconds
+// Config file no longer needed with fixed interval
+let CHECK_INTERVAL = 10 * 60 * 1000; // Fixed: 10 minutes in milliseconds
 let checkIntervalTimer: NodeJS.Timeout;
 
-// Valid check intervals in minutes
-const VALID_CHECK_INTERVALS = [1, 5, 8, 10];
+// Configuration functions removed - using fixed 10 minute interval
 
-/**
- * Ensure configuration files exist
- */
-function ensureConfigFilesExist() {
-  const dataDir = path.dirname(CONFIG_FILE);
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-    console.log(`Created data directory: ${dataDir}`);
-  }
-
-  if (!fs.existsSync(CONFIG_FILE)) {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify({ checkInterval: 5 }, null, 2));
-    console.log(`Created config.json file: ${CONFIG_FILE}`);
-  }
-}
-
-/**
- * Load configuration from file
- */
-function loadConfig(): { checkInterval: number } {
-  try {
-    ensureConfigFilesExist();
-    const data = fs.readFileSync(CONFIG_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (error) {
-    console.error('Error loading config:', error);
-    return { checkInterval: 5 }; // Default to 5 minutes
-  }
-}
-
-/**
- * Save configuration to file
- */
-function saveConfig(config: { checkInterval: number }): void {
-  try {
-    ensureConfigFilesExist();
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-    console.log(`Configuration saved: Check interval set to ${config.checkInterval} minutes`);
-  } catch (error) {
-    console.error('Error saving config:', error);
-  }
-}
-
-/**
- * Set check interval in minutes
- */
-export function setCheckInterval(minutes: number): boolean {
-  // Validate input
-  if (!VALID_CHECK_INTERVALS.includes(minutes)) {
-    console.error(`Invalid check interval: ${minutes}. Must be one of: ${VALID_CHECK_INTERVALS.join(', ')}`);
-    return false;
-  }
-
-  // Convert to milliseconds
-  CHECK_INTERVAL = minutes * 60 * 1000;
-  
-  // Save to config file
-  saveConfig({ checkInterval: minutes });
-  
-  // Restart the interval timer
-  if (checkIntervalTimer) {
-    clearInterval(checkIntervalTimer);
-  }
-  checkIntervalTimer = setInterval(checkAllServers, CHECK_INTERVAL);
-  
-  console.log(`Check interval updated to ${minutes} minute(s) (${CHECK_INTERVAL}ms)`);
-  return true;
-}
+// setCheckInterval function removed - using fixed 10 minute interval
 
 /**
  * Ensure data files exist function
@@ -195,11 +127,9 @@ export function startHealthCheckScheduler(): void {
   
   // Make sure data files exist before starting
   ensureDataFilesExist();
-  ensureConfigFilesExist();
   
-  // Load configuration
-  const config = loadConfig();
-  setCheckInterval(config.checkInterval);
+  // Start with fixed 10 minute interval
+  checkIntervalTimer = setInterval(checkAllServers, CHECK_INTERVAL);
   
   // Run an initial check immediately
   checkAllServers();

@@ -153,13 +153,7 @@ button.remove:hover {
   background-color: #dc2626;
 }
 
-#save-settings {
-  background-color: var(--success-color);
-}
-
-#save-settings:hover {
-  background-color: #16a34a;
-}
+/* Settings button styles removed */
 
 .error-message {
   color: var(--danger-color);

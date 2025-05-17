@@ -3,9 +3,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const serverUrlInput = document.getElementById('server-url');
   const addErrorElement = document.getElementById('add-error');
   const serversContainer = document.getElementById('servers-container');
-  const refreshTimeSelect = document.getElementById('refresh-time');
-  const saveSettingsButton = document.getElementById('save-settings');
-  const settingsMessage = document.getElementById('settings-message');
   const logoutButton = document.getElementById('logout-btn');
   
   // Logout functionality
@@ -35,72 +32,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
   
-  // Default refresh interval in milliseconds (5 minutes)
-  let refreshInterval = 5 * 60 * 1000;
-  let refreshTimerId;
-
-  // Load refresh time from localStorage
-  if (localStorage.getItem('refreshTime')) {
-    const savedTime = localStorage.getItem('refreshTime');
-    refreshTimeSelect.value = savedTime;
-    refreshInterval = parseInt(savedTime) * 60 * 1000; // Convert minutes to milliseconds
-  }
+  // Fixed refresh interval in milliseconds (10 minutes)
+  const refreshInterval = 10 * 60 * 1000;
   
-  // Save and apply settings button click
-  saveSettingsButton.addEventListener('click', async () => {
-    const newRefreshTime = refreshTimeSelect.value;
-    
-    // Show loading state
-    saveSettingsButton.disabled = true;
-    saveSettingsButton.textContent = 'Applying...';
-    
-    try {
-      // 1. First apply to server
-      const response = await fetch('/api/config', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ checkInterval: parseInt(newRefreshTime) })
-      });
-      
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to update server configuration');
-      }
-      
-      // 2. Then save to localStorage
-      localStorage.setItem('refreshTime', newRefreshTime);
-      
-      // 3. Update client-side refresh interval
-      if (refreshTimerId) {
-        clearInterval(refreshTimerId);
-      }
-      refreshInterval = parseInt(newRefreshTime) * 60 * 1000;
-      refreshTimerId = setInterval(loadServers, refreshInterval);
-      
-      // Show success message
-      settingsMessage.textContent = `Updated to ${newRefreshTime} minute${newRefreshTime === "1" ? "" : "s"} refresh`;
-      settingsMessage.className = 'success-message';
-      
-      // Clear message after 3 seconds
-      setTimeout(() => {
-        settingsMessage.textContent = '';
-      }, 3000);
-      
-    } catch (error) {
-      // Show error message
-      settingsMessage.textContent = error.message;
-      settingsMessage.className = 'error-message';
-    } finally {
-      // Reset button state
-      saveSettingsButton.disabled = false;
-      saveSettingsButton.textContent = 'Save & Apply';
-    }
-  });
+  // Settings section has been removed - using fixed 10 minute interval
 
   // Load servers on page load
   loadServers();
+  
+  // Set up auto-refresh with fixed 10-minute interval
+  setInterval(loadServers, refreshInterval);
 
   // Add server form submission
   serverForm.addEventListener('submit', async (e) => {
@@ -244,5 +185,5 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Set up auto-refresh with the configurable interval
-  refreshTimerId = setInterval(loadServers, refreshInterval);
+  setInterval(loadServers, refreshInterval);
 });

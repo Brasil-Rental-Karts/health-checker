@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import express from 'express';
 import session from 'express-session';
-import { startHealthCheckScheduler, checkServerHealth, setCheckInterval } from './healthChecker';
+import { startHealthCheckScheduler, checkServerHealth } from './healthChecker';
 import { Server } from './types';
 import dotenv from 'dotenv';
 
@@ -262,31 +262,7 @@ app.post('/api/servers', async (req, res) => {
   }
 });
 
-// Configuration endpoint
-app.post('/api/config', (req, res) => {
-  try {
-    const { checkInterval } = req.body;
-    
-    if (checkInterval === undefined) {
-      return res.status(400).json({ error: 'checkInterval is required' });
-    }
-    
-    // Validate and update the check interval
-    const success = setCheckInterval(checkInterval);
-    
-    if (!success) {
-      return res.status(400).json({ error: 'Invalid check interval. Must be one of: 1, 5, 8, 10 minutes' });
-    }
-    
-    res.status(200).json({ 
-      message: `Check interval updated to ${checkInterval} minute(s)`,
-      checkInterval
-    });
-  } catch (error) {
-    console.error('Config update error:', error);
-    res.status(500).json({ error: 'Failed to update configuration' });
-  }
-});
+// Configuration endpoint removed - using fixed 10 minute interval
 
 // Authentication check endpoint
 app.get('/api/auth/check', (req, res) => {

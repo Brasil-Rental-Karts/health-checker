@@ -64,7 +64,7 @@ To build and run the application in production mode:
 ## Configuration
 
 - The default port is 3000. You can change it by setting the PORT environment variable
-- Health checks run every 5 minutes by default. You can modify this interval in the `src/healthChecker.ts` file
+- Health checks run at a fixed interval of 10 minutes
 
 ## Project Structure
 
