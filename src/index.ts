@@ -11,7 +11,7 @@ import axios from 'axios';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;  // Allow PORT to be configured via environment variable
 const DATA_FILE = path.join(__dirname, '../data/servers.json');
 const START_TIME = new Date();
 
@@ -29,75 +29,265 @@ const githubApi = axios.create({
   }
 });
 
-// Function to read data from GitHub Gist
-async function readFromGist(): Promise<{ servers: Server[] }> {
+// Add cache and retry configuration
+let gistDataCache: { servers: Server[] } | null = null;
+let lastGistFetch: number = 0;
+const CACHE_TTL = 60 * 1000; // 1 minute cache
+const RETRY_DELAY = 30 * 1000; // 30 seconds retry delay
+const MAX_RETRIES = 3; // Maximum number of retry attempts
+
+// Request lock mechanism
+let gistRequestInProgress: Promise<{ servers: Server[] }> | null = null;
+let gistWriteInProgress: Promise<void> | null = null;
+
+// Helper function to wait
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Function to check rate limit from response and get reset time
+function getRateLimitInfo(error: any): { isRateLimit: boolean; resetDate: Date | null } {
+  if (axios.isAxiosError(error) && error.response) {
+    const headers = error.response.headers;
+    const limit = headers['x-ratelimit-limit'];
+    const remaining = headers['x-ratelimit-remaining'];
+    const reset = headers['x-ratelimit-reset'];
+    const resetDate = reset ? new Date(parseInt(reset) * 1000) : null;
+    
+    if (limit && remaining !== undefined) {
+      console.log(`GitHub API Rate Limit Status:
+        - Total Limit: ${limit}
+        - Remaining: ${remaining}
+        - Resets at: ${resetDate ? resetDate.toLocaleString() : 'unknown'}
+      `);
+      
+      return {
+        isRateLimit: parseInt(remaining) === 0,
+        resetDate
+      };
+    }
+  }
+  return { isRateLimit: false, resetDate: null };
+}
+
+// Function to wait until rate limit reset
+async function waitForRateLimit(resetDate: Date): Promise<void> {
+  const now = new Date();
+  const waitTime = resetDate.getTime() - now.getTime();
+  
+  if (waitTime <= 0) {
+    return;
+  }
+
+  console.log(`Waiting for rate limit to reset in ${Math.ceil(waitTime / 1000)} seconds...`);
+  return new Promise(resolve => setTimeout(resolve, waitTime));
+}
+
+// Function to validate GitHub token
+async function validateGithubToken(): Promise<boolean> {
   try {
-    if (!GITHUB_TOKEN || !GIST_ID) {
-      console.log('GitHub configuration not found, falling back to local file');
-      return readServersData();
-    }
-
-    const response = await githubApi.get(`/gists/${GIST_ID}`);
-    
-    // Check if the gist exists and has our file
-    if (!response.data.files || !response.data.files['servers.json']) {
-      console.log('servers.json not found in gist, creating it');
-      // Create the file in the gist
-      await githubApi.patch(`/gists/${GIST_ID}`, {
-        files: {
-          'servers.json': {
-            content: JSON.stringify({ servers: [] }, null, 2)
-          }
-        }
-      });
-      return { servers: [] };
-    }
-
-    const content = response.data.files['servers.json'].content;
-    const parsedData = JSON.parse(content);
-    
-    // Ensure the data has the correct structure
-    if (!parsedData.servers) {
-      console.log('Invalid data structure in gist, initializing empty servers array');
-      return { servers: [] };
-    }
-
-    return parsedData;
+    const response = await githubApi.get('/user');
+    return true;
   } catch (error) {
-    console.error('Error reading from Gist:', error);
-    // Fallback to local file if Gist read fails
-    return readServersData();
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      console.error('GitHub token is invalid or expired');
+      return false;
+    }
+    // For other errors, assume token might be valid
+    return true;
   }
 }
 
-// Function to write data to GitHub Gist
-async function writeToGist(data: { servers: Server[] }): Promise<void> {
+// Function to read data from GitHub Gist with retry
+async function readFromGist(retryCount = 0): Promise<{ servers: Server[] }> {
+  // If there's already a request in progress, wait for it
+  if (gistRequestInProgress) {
+    console.log('Another Gist read request is in progress, waiting for it to complete...');
+    return gistRequestInProgress;
+  }
+
   try {
-    if (!GITHUB_TOKEN || !GIST_ID) {
-      console.log('GitHub configuration not found, falling back to local file');
-      return writeServersData(data);
-    }
-
-    // Validate data structure before writing
-    if (!data || !Array.isArray(data.servers)) {
-      console.error('Invalid data structure, not writing to Gist');
-      throw new Error('Invalid data structure');
-    }
-
-    // Try to update the gist
-    await githubApi.patch(`/gists/${GIST_ID}`, {
-      files: {
-        'servers.json': {
-          content: JSON.stringify(data, null, 2)
+    // Create a new request promise
+    gistRequestInProgress = (async () => {
+      try {
+        // Check cache first
+        const now = Date.now();
+        if (gistDataCache && (now - lastGistFetch) < CACHE_TTL) {
+          console.log('Using cached Gist data');
+          return gistDataCache;
         }
-      }
-    });
 
-    console.log('Successfully wrote data to Gist');
-  } catch (error) {
-    console.error('Error writing to Gist:', error);
-    // Fallback to local file if Gist write fails
-    await writeServersData(data);
+        if (!GITHUB_TOKEN || !GIST_ID) {
+          console.log('GitHub configuration not found, falling back to local file');
+          return readServersData();
+        }
+
+        // Validate token on first request
+        if (retryCount === 0) {
+          const isValid = await validateGithubToken();
+          if (!isValid) {
+            console.error('Invalid GitHub token, falling back to local file');
+            return readServersData();
+          }
+        }
+
+        console.log('Fetching fresh data from GitHub Gist');
+        const response = await githubApi.get(`/gists/${GIST_ID}`);
+        
+        // Check if the gist exists and has our file
+        if (!response.data.files || !response.data.files['servers.json']) {
+          console.log('servers.json not found in gist, creating it');
+          // Create the file in the gist
+          await githubApi.patch(`/gists/${GIST_ID}`, {
+            files: {
+              'servers.json': {
+                content: JSON.stringify({ servers: [] }, null, 2)
+              }
+            }
+          });
+          gistDataCache = { servers: [] };
+          lastGistFetch = now;
+          return gistDataCache;
+        }
+
+        const content = response.data.files['servers.json'].content;
+        const parsedData = JSON.parse(content);
+        
+        // Ensure the data has the correct structure
+        if (!parsedData.servers) {
+          console.log('Invalid data structure in gist, initializing empty servers array');
+          parsedData.servers = [];
+        }
+
+        // Update cache
+        gistDataCache = parsedData;
+        lastGistFetch = now;
+        return parsedData;
+      } catch (error) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+          
+          // Check if it's a rate limit issue
+          if (status === 403) {
+            const { isRateLimit, resetDate } = getRateLimitInfo(error);
+            if (isRateLimit) {
+              if (resetDate && retryCount < MAX_RETRIES) {
+                console.log('Rate limit exceeded, waiting for reset...');
+                // Clear the lock before waiting
+                gistRequestInProgress = null;
+                // Wait until reset time
+                await waitForRateLimit(resetDate);
+                // Try again after reset
+                return readFromGist(retryCount + 1);
+              }
+              console.error('GitHub API rate limit exceeded and no reset time available, using cached data or falling back to local file');
+              return gistDataCache || readServersData();
+            } else {
+              console.error('GitHub API access forbidden - check if token has gist permissions');
+              return readServersData();
+            }
+          }
+
+          // If server error and not exceeded max retries
+          if ((status === 500 || status === 502 || status === 503 || status === 504) && retryCount < MAX_RETRIES) {
+            console.log(`GitHub API error (${status}), retrying in 30 seconds... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+            await wait(RETRY_DELAY);
+            // Clear the lock before retrying
+            gistRequestInProgress = null;
+            return readFromGist(retryCount + 1);
+          }
+        }
+        
+        console.error('Error reading from Gist:', error);
+        // Fallback to local file if Gist read fails
+        return readServersData();
+      }
+    })();
+
+    return await gistRequestInProgress;
+  } finally {
+    // Clear the lock after the request is complete
+    gistRequestInProgress = null;
+  }
+}
+
+// Function to write data to GitHub Gist with retry
+async function writeToGist(data: { servers: Server[] }, retryCount = 0): Promise<void> {
+  // If there's already a write in progress, wait for it
+  if (gistWriteInProgress) {
+    console.log('Another Gist write request is in progress, waiting for it to complete...');
+    return gistWriteInProgress;
+  }
+
+  try {
+    // Create a new write promise
+    gistWriteInProgress = (async () => {
+      try {
+        if (!GITHUB_TOKEN || !GIST_ID) {
+          console.log('GitHub configuration not found, falling back to local file');
+          return writeServersData(data);
+        }
+
+        // Validate data structure before writing
+        if (!data || !Array.isArray(data.servers)) {
+          console.error('Invalid data structure, not writing to Gist');
+          throw new Error('Invalid data structure');
+        }
+
+        // Update cache immediately
+        gistDataCache = { ...data };
+        lastGistFetch = Date.now();
+
+        // Try to update the gist
+        await githubApi.patch(`/gists/${GIST_ID}`, {
+          files: {
+            'servers.json': {
+              content: JSON.stringify(data, null, 2)
+            }
+          }
+        });
+
+        console.log('Successfully wrote data to Gist');
+      } catch (error) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+          
+          // Check if it's a rate limit issue
+          if (status === 403) {
+            const { isRateLimit, resetDate } = getRateLimitInfo(error);
+            if (isRateLimit && resetDate && retryCount < MAX_RETRIES) {
+              console.log('Rate limit exceeded, waiting for reset...');
+              // Clear the lock before waiting
+              gistWriteInProgress = null;
+              // Wait until reset time
+              await waitForRateLimit(resetDate);
+              // Try again after reset
+              return writeToGist(data, retryCount + 1);
+            } else {
+              console.error('GitHub API rate limit exceeded, saving to local file');
+              await writeServersData(data);
+              return;
+            }
+          }
+
+          // If server error and not exceeded max retries
+          if ((status === 500 || status === 502 || status === 503 || status === 504) && retryCount < MAX_RETRIES) {
+            console.log(`GitHub API error (${status}), retrying in 30 seconds... (attempt ${retryCount + 1}/${MAX_RETRIES})`);
+            await wait(RETRY_DELAY);
+            // Clear the lock before retrying
+            gistWriteInProgress = null;
+            return writeToGist(data, retryCount + 1);
+          }
+        }
+        
+        console.error('Error writing to Gist:', error);
+        // Fallback to local file if Gist write fails
+        await writeServersData(data);
+      }
+    })();
+
+    return await gistWriteInProgress;
+  } finally {
+    // Clear the lock after the write is complete
+    gistWriteInProgress = null;
   }
 }
 
@@ -105,9 +295,41 @@ async function writeToGist(data: { servers: Server[] }): Promise<void> {
 console.log('Environment loaded. APP_PASSWORD length:', APP_PASSWORD.length);
 console.log('NODE_ENV:', process.env.NODE_ENV);
 
-// Middleware
+// Middleware for parsing JSON and serving static files
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Health endpoint - BEFORE any authentication
+app.get('/health', async (req, res) => {
+  try {
+    const uptime = Math.floor((new Date().getTime() - START_TIME.getTime()) / 1000);
+    let serverCount = 0;
+    
+    try {
+      const data = await readServersData();
+      serverCount = data.servers.length;
+    } catch (error) {
+      console.error('Error reading servers data during health check:', error);
+      // Continue with health check even if we can't read server data
+    }
+    
+    res.status(200).json({
+      status: 'healthy',
+      version: '1.0.0',
+      uptime: `${uptime} seconds`,
+      serverCount,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Health check endpoint error:', error);
+    res.status(500).json({ 
+      status: 'unhealthy',
+      error: 'Internal server error'
+    });
+  }
+});
+
+// Session middleware
 app.use(session({
   secret: 'server-health-monitor-secret',
   resave: true,
@@ -119,10 +341,11 @@ app.use(session({
   }
 }));
 
-// Authentication middleware
+// Authentication middleware - AFTER health endpoint
 const requireAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-  // Skip auth for health check and login endpoints
-  if (req.path === '/health' || req.path === '/login' || req.path === '/login.html') {
+  // Public endpoints that don't require authentication
+  const publicPaths = ['/health', '/login', '/login.html'];
+  if (publicPaths.includes(req.path)) {
     return next();
   }
   
@@ -140,7 +363,7 @@ const requireAuth = (req: express.Request, res: express.Response, next: express.
   res.status(401).json({ error: 'Authentication required' });
 };
 
-// Apply auth middleware to all routes
+// Apply auth middleware to all routes AFTER the health endpoint
 app.use(requireAuth);
 
 // Login route
@@ -176,28 +399,6 @@ app.post('/logout', (req, res) => {
   }
 });
 
-// Health endpoint
-app.get('/health', async (req, res) => {
-  try {
-    const uptime = Math.floor((new Date().getTime() - START_TIME.getTime()) / 1000);
-    const data = await readServersData();
-    
-    res.status(200).json({
-      status: 'healthy',
-      version: '1.0.0',
-      uptime: `${uptime} seconds`,
-      serverCount: data.servers.length,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Health check endpoint error:', error);
-    res.status(500).json({ 
-      status: 'unhealthy',
-      error: 'Internal server error'
-    });
-  }
-});
-
 // Ensure data files exist function
 function ensureDataFilesExist() {
   const dataDir = path.dirname(DATA_FILE);
@@ -216,7 +417,7 @@ function ensureDataFilesExist() {
 ensureDataFilesExist();
 
 // Modify readServersData to use Gist
-async function readServersData(): Promise<{ servers: Server[] }> {
+export async function readServersData(): Promise<{ servers: Server[] }> {
   try {
     if (GITHUB_TOKEN && GIST_ID) {
       return await readFromGist();
@@ -238,7 +439,7 @@ async function readServersData(): Promise<{ servers: Server[] }> {
 }
 
 // Modify writeServersData to use Gist
-async function writeServersData(data: { servers: Server[] }): Promise<void> {
+export async function writeServersData(data: { servers: Server[] }): Promise<void> {
   try {
     if (GITHUB_TOKEN && GIST_ID) {
       await writeToGist(data);
