@@ -5,6 +5,7 @@ import session from 'express-session';
 import { startHealthCheckScheduler, checkServerHealth } from './healthChecker';
 import { Server } from './types';
 import dotenv from 'dotenv';
+import axios from 'axios';
 
 // Load environment variables
 dotenv.config();
@@ -14,8 +15,91 @@ const PORT = 3000;
 const DATA_FILE = path.join(__dirname, '../data/servers.json');
 const START_TIME = new Date();
 
-// Get password from environment variables and trim any whitespace
+// Get environment variables
 const APP_PASSWORD = (process.env.APP_PASSWORD || 'securemonitor123').trim();
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+const GIST_ID = process.env.GIST_ID;
+
+// GitHub API configuration
+const githubApi = axios.create({
+  baseURL: 'https://api.github.com',
+  headers: {
+    'Authorization': `token ${GITHUB_TOKEN}`,
+    'Accept': 'application/vnd.github.v3+json'
+  }
+});
+
+// Function to read data from GitHub Gist
+async function readFromGist(): Promise<{ servers: Server[] }> {
+  try {
+    if (!GITHUB_TOKEN || !GIST_ID) {
+      console.log('GitHub configuration not found, falling back to local file');
+      return readServersData();
+    }
+
+    const response = await githubApi.get(`/gists/${GIST_ID}`);
+    
+    // Check if the gist exists and has our file
+    if (!response.data.files || !response.data.files['servers.json']) {
+      console.log('servers.json not found in gist, creating it');
+      // Create the file in the gist
+      await githubApi.patch(`/gists/${GIST_ID}`, {
+        files: {
+          'servers.json': {
+            content: JSON.stringify({ servers: [] }, null, 2)
+          }
+        }
+      });
+      return { servers: [] };
+    }
+
+    const content = response.data.files['servers.json'].content;
+    const parsedData = JSON.parse(content);
+    
+    // Ensure the data has the correct structure
+    if (!parsedData.servers) {
+      console.log('Invalid data structure in gist, initializing empty servers array');
+      return { servers: [] };
+    }
+
+    return parsedData;
+  } catch (error) {
+    console.error('Error reading from Gist:', error);
+    // Fallback to local file if Gist read fails
+    return readServersData();
+  }
+}
+
+// Function to write data to GitHub Gist
+async function writeToGist(data: { servers: Server[] }): Promise<void> {
+  try {
+    if (!GITHUB_TOKEN || !GIST_ID) {
+      console.log('GitHub configuration not found, falling back to local file');
+      return writeServersData(data);
+    }
+
+    // Validate data structure before writing
+    if (!data || !Array.isArray(data.servers)) {
+      console.error('Invalid data structure, not writing to Gist');
+      throw new Error('Invalid data structure');
+    }
+
+    // Try to update the gist
+    await githubApi.patch(`/gists/${GIST_ID}`, {
+      files: {
+        'servers.json': {
+          content: JSON.stringify(data, null, 2)
+        }
+      }
+    });
+
+    console.log('Successfully wrote data to Gist');
+  } catch (error) {
+    console.error('Error writing to Gist:', error);
+    // Fallback to local file if Gist write fails
+    await writeServersData(data);
+  }
+}
 
 // Log the loaded password (for debugging)
 console.log('Environment loaded. APP_PASSWORD length:', APP_PASSWORD.length);
@@ -93,10 +177,10 @@ app.post('/logout', (req, res) => {
 });
 
 // Health endpoint
-app.get('/health', (req, res) => {
+app.get('/health', async (req, res) => {
   try {
     const uptime = Math.floor((new Date().getTime() - START_TIME.getTime()) / 1000);
-    const data = readServersData();
+    const data = await readServersData();
     
     res.status(200).json({
       status: 'healthy',
@@ -131,10 +215,14 @@ function ensureDataFilesExist() {
 // Call this function at startup
 ensureDataFilesExist();
 
-// Read servers data safely
-function readServersData(): { servers: Server[] } {
+// Modify readServersData to use Gist
+async function readServersData(): Promise<{ servers: Server[] }> {
   try {
-    // Check if file exists again before attempting to read
+    if (GITHUB_TOKEN && GIST_ID) {
+      return await readFromGist();
+    }
+
+    // Fallback to local file
     if (!fs.existsSync(DATA_FILE)) {
       console.log("servers.json not found, recreating...");
       ensureDataFilesExist();
@@ -149,10 +237,15 @@ function readServersData(): { servers: Server[] } {
   }
 }
 
-// Write servers data safely
-function writeServersData(data: { servers: Server[] }): void {
+// Modify writeServersData to use Gist
+async function writeServersData(data: { servers: Server[] }): Promise<void> {
   try {
-    // Ensure directory exists before writing
+    if (GITHUB_TOKEN && GIST_ID) {
+      await writeToGist(data);
+      return;
+    }
+
+    // Fallback to local file
     const dataDir = path.dirname(DATA_FILE);
     if (!fs.existsSync(dataDir)) {
       fs.mkdirSync(dataDir, { recursive: true });
@@ -164,12 +257,11 @@ function writeServersData(data: { servers: Server[] }): void {
   }
 }
 
-// API Routes
-// Get all servers
-app.get('/api/servers', (req, res) => {
+// Modify API routes to be async
+app.get('/api/servers', async (req, res) => {
   try {
-    const { servers } = readServersData();
-    res.json(servers);
+    const data = await readServersData();
+    res.json(data.servers);
   } catch (error) {
     console.error('Error reading servers:', error);
     res.status(500).json({ error: 'Failed to load servers' });
@@ -177,12 +269,12 @@ app.get('/api/servers', (req, res) => {
 });
 
 // Get a specific server
-app.get('/api/servers/:id', (req, res) => {
+app.get('/api/servers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { servers } = readServersData();
+    const data = await readServersData();
     
-    const server = servers.find((s: Server) => s.id === id);
+    const server = data.servers.find((s: Server) => s.id === id);
     
     if (!server) {
       return res.status(404).json({ error: 'Server not found' });
@@ -196,10 +288,10 @@ app.get('/api/servers/:id', (req, res) => {
 });
 
 // Delete a server
-app.delete('/api/servers/:id', (req, res) => {
+app.delete('/api/servers/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const data = readServersData();
+    const data = await readServersData();
     
     const serverIndex = data.servers.findIndex((s: Server) => s.id === id);
     
@@ -207,9 +299,8 @@ app.delete('/api/servers/:id', (req, res) => {
       return res.status(404).json({ error: 'Server not found' });
     }
     
-    // Remove the server
     data.servers.splice(serverIndex, 1);
-    writeServersData(data);
+    await writeServersData(data);
     
     res.status(200).json({ message: 'Server deleted successfully' });
   } catch (error) {
@@ -227,14 +318,12 @@ app.post('/api/servers', async (req, res) => {
       return res.status(400).json({ error: 'URL is required' });
     }
     
-    const data = readServersData();
+    const data = await readServersData();
     
-    // Check if server already exists
     if (data.servers.some((server: Server) => server.url === url)) {
       return res.status(400).json({ error: 'Server already exists' });
     }
     
-    // Add new server with unknown status
     const newServer: Server = {
       id: Date.now().toString(),
       url,
@@ -242,18 +331,16 @@ app.post('/api/servers', async (req, res) => {
       lastChecked: null
     };
     
-    // Immediately perform health check on the new server
     try {
       const status = await checkServerHealth(newServer);
       newServer.status = status;
       newServer.lastChecked = new Date().toISOString();
     } catch (error) {
       console.error(`Initial health check failed for ${url}:`, error);
-      // Keep default status if check fails
     }
     
     data.servers.push(newServer);
-    writeServersData(data);
+    await writeServersData(data);
     
     res.status(201).json(newServer);
   } catch (error) {
