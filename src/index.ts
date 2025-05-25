@@ -301,15 +301,32 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // Health endpoint - BEFORE any authentication
 app.get('/health', async (req, res) => {
+  // Set a timeout for the health check
+  const HEALTH_CHECK_TIMEOUT = 5000; // 5 seconds
+  
   try {
     const uptime = Math.floor((new Date().getTime() - START_TIME.getTime()) / 1000);
     let serverCount = 0;
     
+    // Create a promise that will reject after the timeout
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Health check timed out')), HEALTH_CHECK_TIMEOUT);
+    });
+
     try {
-      const data = await readServersData();
+      // Race between reading data and timeout
+      const data = await Promise.race([
+        readServersData(),
+        timeoutPromise
+      ]) as { servers: Server[] };
       serverCount = data.servers.length;
     } catch (error) {
-      console.error('Error reading servers data during health check:', error);
+      console.error('Error or timeout reading servers data during health check:', error);
+      // If we have cached data, use it
+      if (gistDataCache) {
+        console.log('Using cached data for health check');
+        serverCount = gistDataCache.servers.length;
+      }
       // Continue with health check even if we can't read server data
     }
     
@@ -318,13 +335,15 @@ app.get('/health', async (req, res) => {
       version: '1.0.0',
       uptime: `${uptime} seconds`,
       serverCount,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      dataSource: gistDataCache ? 'cache' : 'file'
     });
   } catch (error) {
     console.error('Health check endpoint error:', error);
     res.status(500).json({ 
       status: 'unhealthy',
-      error: 'Internal server error'
+      error: 'Internal server error',
+      timestamp: new Date().toISOString()
     });
   }
 });
