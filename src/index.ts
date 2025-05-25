@@ -32,9 +32,17 @@ const githubApi = axios.create({
 // Add cache and retry configuration
 let gistDataCache: { servers: Server[] } | null = null;
 let lastGistFetch: number = 0;
-const CACHE_TTL = 60 * 1000; // 1 minute cache
+const CACHE_TTL = 5 * 60 * 1000; // Increased to 5 minutes cache
 const RETRY_DELAY = 30 * 1000; // 30 seconds retry delay
 const MAX_RETRIES = 3; // Maximum number of retry attempts
+
+// Rate limiting configuration
+const RATE_LIMIT_BUFFER = 10; // Keep 10 requests as buffer
+let rateLimitRemaining = 5000; // GitHub's default rate limit
+let rateLimitReset = 0;
+let requestCount = 0;
+const REQUEST_WINDOW = 60 * 60 * 1000; // 1 hour in milliseconds
+const requestTimes: number[] = [];
 
 // Request lock mechanism
 let gistRequestInProgress: Promise<{ servers: Server[] }> | null = null;
@@ -43,56 +51,108 @@ let gistWriteInProgress: Promise<void> | null = null;
 // Helper function to wait
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Function to check rate limit from response and get reset time
-function getRateLimitInfo(error: any): { isRateLimit: boolean; resetDate: Date | null } {
-  if (axios.isAxiosError(error) && error.response) {
-    const headers = error.response.headers;
-    const limit = headers['x-ratelimit-limit'];
-    const remaining = headers['x-ratelimit-remaining'];
-    const reset = headers['x-ratelimit-reset'];
-    const resetDate = reset ? new Date(parseInt(reset) * 1000) : null;
-    
-    if (limit && remaining !== undefined) {
-      console.log(`GitHub API Rate Limit Status:
-        - Total Limit: ${limit}
-        - Remaining: ${remaining}
-        - Resets at: ${resetDate ? resetDate.toLocaleString() : 'unknown'}
-      `);
-      
-      return {
-        isRateLimit: parseInt(remaining) === 0,
-        resetDate
-      };
-    }
-  }
-  return { isRateLimit: false, resetDate: null };
-}
-
-// Function to wait until rate limit reset
-async function waitForRateLimit(resetDate: Date): Promise<void> {
-  const now = new Date();
-  const waitTime = resetDate.getTime() - now.getTime();
+// Function to check if we should throttle requests
+function shouldThrottle(): boolean {
+  const now = Date.now();
   
-  if (waitTime <= 0) {
-    return;
+  // Remove old requests from the window
+  while (requestTimes.length > 0 && requestTimes[0] < now - REQUEST_WINDOW) {
+    requestTimes.shift();
   }
-
-  console.log(`Waiting for rate limit to reset in ${Math.ceil(waitTime / 1000)} seconds...`);
-  return new Promise(resolve => setTimeout(resolve, waitTime));
+  
+  // More conservative buffer for rate limit
+  const safetyBuffer = Math.max(RATE_LIMIT_BUFFER, Math.floor(rateLimitRemaining * 0.1)); // 10% of remaining or minimum buffer
+  
+  // If we're close to the rate limit, throttle
+  if (rateLimitRemaining <= safetyBuffer) {
+    console.log(`Throttling: Only ${rateLimitRemaining} requests remaining until reset (buffer: ${safetyBuffer})`);
+    return true;
+  }
+  
+  // If we've made too many requests in the window, throttle
+  const hourlyLimit = Math.floor((rateLimitRemaining - safetyBuffer) / 6); // Allow roughly 1/6 of remaining requests per hour
+  if (requestTimes.length >= hourlyLimit) {
+    console.log(`Throttling: Made ${requestTimes.length} requests in the last hour (limit: ${hourlyLimit})`);
+    return true;
+  }
+  
+  return false;
 }
 
-// Function to validate GitHub token
+// Function to track API request
+function trackApiRequest() {
+  const now = Date.now();
+  requestTimes.push(now);
+  requestCount++;
+}
+
+// Function to check rate limit from response and get reset time
+function getRateLimitInfo(response: any): { remaining: number; resetTime: number; isRateLimit: boolean } {
+  let remaining = 5000; // Default GitHub rate limit
+  let resetTime = 0;
+  let isRateLimit = false;
+  
+  if (response?.headers) {
+    const headers = response.headers;
+    remaining = parseInt(headers['x-ratelimit-remaining'] || '5000');
+    resetTime = parseInt(headers['x-ratelimit-reset'] || '0') * 1000;
+    const limit = headers['x-ratelimit-limit'];
+    const used = headers['x-ratelimit-used'];
+    
+    // Check if this is a rate limit response
+    if (response.status === 403 && response.data?.message?.includes('rate limit')) {
+      isRateLimit = true;
+    }
+    
+    console.log(`GitHub API Rate Limit Status:
+      - Total Limit: ${limit}
+      - Used: ${used}
+      - Remaining: ${remaining}
+      - Resets at: ${new Date(resetTime).toLocaleString()}
+      - Current request count: ${requestCount}
+      - Requests in last hour: ${requestTimes.length}
+      - Is rate limited: ${isRateLimit}
+    `);
+  }
+  
+  return { remaining, resetTime, isRateLimit };
+}
+
+// Function to validate GitHub token and check scopes
 async function validateGithubToken(): Promise<boolean> {
   try {
     const response = await githubApi.get('/user');
-    return true;
-  } catch (error) {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
-      console.error('GitHub token is invalid or expired');
+    
+    // Check scopes from response headers
+    const scopes = response.headers['x-oauth-scopes']?.split(', ') || [];
+    const requiredScopes = ['gist'];
+    
+    const hasRequiredScopes = requiredScopes.every(scope => scopes.includes(scope));
+    if (!hasRequiredScopes) {
+      console.error('GitHub token is missing required scopes. Required:', requiredScopes, 'Current:', scopes);
       return false;
     }
-    // For other errors, assume token might be valid
+    
     return true;
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response?.status === 401) {
+        console.error('GitHub token is invalid or expired');
+        return false;
+      }
+      if (error.response?.status === 403) {
+        const message = error.response.data?.message || '';
+        if (message.includes('rate limit')) {
+          console.error('Rate limit exceeded during token validation');
+          // Consider token valid but rate limited
+          return true;
+        }
+        console.error('GitHub token has insufficient permissions');
+        return false;
+      }
+    }
+    console.error('Error validating GitHub token:', error);
+    return false;
   }
 }
 
@@ -120,11 +180,20 @@ async function readFromGist(retryCount = 0): Promise<{ servers: Server[] }> {
           return readServersData();
         }
 
+        // Check if we should throttle
+        if (shouldThrottle()) {
+          console.log('Request throttled, using cached data');
+          if (gistDataCache) {
+            return gistDataCache;
+          }
+          return readServersData();
+        }
+
         // Validate token on first request
         if (retryCount === 0) {
           const isValid = await validateGithubToken();
           if (!isValid) {
-            console.error('Invalid GitHub token, falling back to local file');
+            console.error('Invalid GitHub token or insufficient permissions, falling back to local file');
             return readServersData();
           }
         }
@@ -132,17 +201,30 @@ async function readFromGist(retryCount = 0): Promise<{ servers: Server[] }> {
         console.log('Fetching fresh data from GitHub Gist');
         const response = await githubApi.get(`/gists/${GIST_ID}`);
         
+        // Track the request and update rate limit info
+        trackApiRequest();
+        const { remaining, resetTime, isRateLimit } = getRateLimitInfo(response);
+        rateLimitRemaining = remaining;
+        rateLimitReset = resetTime;
+        
         // Check if the gist exists and has our file
         if (!response.data.files || !response.data.files['servers.json']) {
           console.log('servers.json not found in gist, creating it');
           // Create the file in the gist
-          await githubApi.patch(`/gists/${GIST_ID}`, {
+          const createResponse = await githubApi.patch(`/gists/${GIST_ID}`, {
             files: {
               'servers.json': {
                 content: JSON.stringify({ servers: [] }, null, 2)
               }
             }
           });
+          
+          // Track the create request
+          trackApiRequest();
+          const createLimitInfo = getRateLimitInfo(createResponse);
+          rateLimitRemaining = createLimitInfo.remaining;
+          rateLimitReset = createLimitInfo.resetTime;
+          
           gistDataCache = { servers: [] };
           lastGistFetch = now;
           return gistDataCache;
@@ -165,25 +247,26 @@ async function readFromGist(retryCount = 0): Promise<{ servers: Server[] }> {
         if (axios.isAxiosError(error)) {
           const status = error.response?.status;
           
-          // Check if it's a rate limit issue
-          if (status === 403) {
-            const { isRateLimit, resetDate } = getRateLimitInfo(error);
+          // Update rate limit info from error response
+          if (error.response) {
+            const { remaining, resetTime, isRateLimit } = getRateLimitInfo(error.response);
+            rateLimitRemaining = remaining;
+            rateLimitReset = resetTime;
+            
+            // If it's a rate limit issue
             if (isRateLimit) {
-              if (resetDate && retryCount < MAX_RETRIES) {
-                console.log('Rate limit exceeded, waiting for reset...');
-                // Clear the lock before waiting
-                gistRequestInProgress = null;
-                // Wait until reset time
-                await waitForRateLimit(resetDate);
-                // Try again after reset
-                return readFromGist(retryCount + 1);
+              console.error('Rate limit reached, using cached data');
+              if (gistDataCache) {
+                return gistDataCache;
               }
-              console.error('GitHub API rate limit exceeded and no reset time available, using cached data or falling back to local file');
-              return gistDataCache || readServersData();
-            } else {
-              console.error('GitHub API access forbidden - check if token has gist permissions');
               return readServersData();
             }
+          }
+          
+          // If it's a permission issue
+          if (status === 403) {
+            console.error('GitHub API access forbidden - check if token has gist permissions');
+            return readServersData();
           }
 
           // If server error and not exceeded max retries
@@ -226,6 +309,12 @@ async function writeToGist(data: { servers: Server[] }, retryCount = 0): Promise
           return writeServersData(data);
         }
 
+        // Check if we should throttle
+        if (shouldThrottle()) {
+          console.log('Write request throttled, falling back to local file');
+          return writeServersData(data);
+        }
+
         // Validate data structure before writing
         if (!data || !Array.isArray(data.servers)) {
           console.error('Invalid data structure, not writing to Gist');
@@ -237,7 +326,7 @@ async function writeToGist(data: { servers: Server[] }, retryCount = 0): Promise
         lastGistFetch = Date.now();
 
         // Try to update the gist
-        await githubApi.patch(`/gists/${GIST_ID}`, {
+        const response = await githubApi.patch(`/gists/${GIST_ID}`, {
           files: {
             'servers.json': {
               content: JSON.stringify(data, null, 2)
@@ -245,27 +334,29 @@ async function writeToGist(data: { servers: Server[] }, retryCount = 0): Promise
           }
         });
 
+        // Track the request and update rate limit info
+        trackApiRequest();
+        const { remaining, resetTime } = getRateLimitInfo(response);
+        rateLimitRemaining = remaining;
+        rateLimitReset = resetTime;
+
         console.log('Successfully wrote data to Gist');
       } catch (error) {
         if (axios.isAxiosError(error)) {
           const status = error.response?.status;
           
+          // Update rate limit info from error response
+          if (error.response) {
+            const { remaining, resetTime } = getRateLimitInfo(error.response);
+            rateLimitRemaining = remaining;
+            rateLimitReset = resetTime;
+          }
+          
           // Check if it's a rate limit issue
           if (status === 403) {
-            const { isRateLimit, resetDate } = getRateLimitInfo(error);
-            if (isRateLimit && resetDate && retryCount < MAX_RETRIES) {
-              console.log('Rate limit exceeded, waiting for reset...');
-              // Clear the lock before waiting
-              gistWriteInProgress = null;
-              // Wait until reset time
-              await waitForRateLimit(resetDate);
-              // Try again after reset
-              return writeToGist(data, retryCount + 1);
-            } else {
-              console.error('GitHub API rate limit exceeded, saving to local file');
-              await writeServersData(data);
-              return;
-            }
+            console.error('Rate limit or permission issue, saving to local file');
+            await writeServersData(data);
+            return;
           }
 
           // If server error and not exceeded max retries
