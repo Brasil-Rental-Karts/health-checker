@@ -1,105 +1,136 @@
-# Server Health Monitor
+# Health Monitor
 
-A modern Node.js server application built with TypeScript and Express that monitors the health of server URLs. The application periodically checks the health of a list of server URLs, determines if each server is healthy or not, and provides a clean web interface to manage and view the monitored servers.
+A simple and minimalist server health monitoring application built with Node.js, TypeScript, and Express. Monitor multiple servers and track their status with a clean, modern interface.
 
 ## Features
 
-- **Health Check Monitoring**: Periodically checks the health of server URLs every 5 minutes
-- **Web Interface**: Clean, responsive UI to add and view monitored servers
-- **Data Persistence**: Stores server data in a JSON file
-- **Real-time Status Updates**: Shows current health status of each server
+- 🚀 **Simple Setup** - No authentication required, just run and monitor
+- 🔧 **Environment Configuration** - Configure servers via environment variables
+- 📊 **Real-time Monitoring** - Automatic health checks every 10 minutes
+- 🎨 **Minimalist UI** - Clean, responsive design
+- 📱 **Mobile Friendly** - Works great on all devices
+- ⚡ **Fast & Lightweight** - Built with performance in mind
 
-## Prerequisites
+## Quick Start
 
-- Node.js (v14 or higher)
-- npm (v6 or higher)
-
-## Installation
-
-1. Clone the repository or download the source code
-
-2. Navigate to the project directory
-   ```
-   cd brk-healthy-status
-   ```
-
-3. Install dependencies
-   ```
+1. **Clone and install dependencies:**
+   ```bash
+   git clone <repository-url>
+   cd health-checker
    npm install
    ```
 
-## Running the Application
-
-### Development Mode
-
-To run the application in development mode with hot-reloading:
-
-```
-npm run dev
-```
-
-The server will start on http://localhost:3000 by default.
-
-### Production Mode
-
-To build and run the application in production mode:
-
-1. Build the TypeScript code
-   ```
-   npm run build
+2. **Configure your servers:**
+   ```bash
+   cp .env.example .env
+   # Edit .env to add your servers
    ```
 
-2. Start the server
-   ```
-   npm start
+3. **Run the application:**
+   ```bash
+   npm run dev
    ```
 
-## Usage
-
-1. Open your browser and navigate to http://localhost:3000
-2. Use the form at the top to add new server URLs for monitoring
-3. View the list of monitored servers with their current health status
-4. Remove servers from monitoring when no longer needed
+4. **Open your browser:**
+   Navigate to `http://localhost:3000`
 
 ## Configuration
 
-- The default port is 3000. You can change it by setting the PORT environment variable
-- Health checks run at a fixed interval of 10 minutes
+### Environment Variables
 
-## Project Structure
+Configure servers using environment variables in your `.env` file:
 
-```
-├── data/                  # Data storage directory
-│   └── servers.json       # JSON file storing server data
-├── dist/                  # Compiled JavaScript files
-├── public/                # Static web assets
-│   ├── index.html         # Main HTML page
-│   ├── styles.css         # CSS styles
-│   └── app.js             # Frontend JavaScript
-├── src/                   # TypeScript source code
-│   ├── index.ts           # Main application entry point
-│   ├── healthChecker.ts   # Health check implementation
-│   └── types.ts           # TypeScript type definitions
-├── package.json           # Project dependencies and scripts
-├── tsconfig.json          # TypeScript configuration
-└── README.md              # Project documentation
+```env
+# Port for the application
+PORT=3000
+
+# Server configuration
+SERVER_1_NAME=Google
+SERVER_1_URL=https://www.google.com
+
+SERVER_2_NAME=GitHub
+SERVER_2_URL=https://github.com
+
+SERVER_3_NAME=My API
+SERVER_3_URL=https://api.myservice.com/health
 ```
 
-## Maintenance
+### Adding Servers
 
-### Adding New Features
+You can add servers in two ways:
 
-To add new features to the application:
+1. **Environment Variables** (recommended for production):
+   - Add `SERVER_X_NAME` and `SERVER_X_URL` to your `.env` file
+   - Environment servers cannot be deleted through the UI
+   - Perfect for permanent infrastructure monitoring
 
-1. Modify the TypeScript files in the `src` directory
-2. Update the frontend files in the `public` directory as needed
-3. Rebuild the application using `npm run build`
+2. **Web Interface**:
+   - Use the "Add Server" form in the web interface
+   - These servers are stored locally and can be deleted
+   - Great for temporary monitoring or testing
 
-### Troubleshooting
+## API Endpoints
 
-- If the application fails to start, check the console for error messages
-- Verify that the `data` directory exists and is writable
-- Ensure all dependencies are installed correctly
+- `GET /health` - Application health check
+- `GET /api/servers` - List all servers
+- `POST /api/servers` - Add a new server
+- `PUT /api/servers/:id` - Update a server
+- `DELETE /api/servers/:id` - Delete a server
+
+## Server Status
+
+- 🟢 **Healthy** - Server responded with status 200-299
+- 🔴 **Unhealthy** - Server responded with error or non-2xx status
+- ⚪ **Unknown** - Server hasn't been checked yet
+
+## Development
+
+```bash
+# Development mode with auto-reload
+npm run dev
+
+# Build for production
+npm run build
+
+# Start production server
+npm start
+```
+
+## Docker
+
+```bash
+# Build the image
+docker build -t health-monitor .
+
+# Run with environment variables
+docker run -p 3000:3000 \
+  -e SERVER_1_NAME="Google" \
+  -e SERVER_1_URL="https://www.google.com" \
+  health-monitor
+```
+
+## Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  health-monitor:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - SERVER_1_NAME=Google
+      - SERVER_1_URL=https://www.google.com
+      - SERVER_2_NAME=GitHub
+      - SERVER_2_URL=https://github.com
+```
+
+## Architecture
+
+- **Backend**: Node.js + TypeScript + Express
+- **Frontend**: Vanilla JavaScript + Modern CSS
+- **Storage**: Local JSON file (no database required)
+- **Monitoring**: Configurable health check intervals
 
 ## License
 

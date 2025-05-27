@@ -1,89 +1,54 @@
 document.addEventListener('DOMContentLoaded', () => {
-  const serverForm = document.getElementById('add-server-form');
-  const serverUrlInput = document.getElementById('server-url');
-  const addErrorElement = document.getElementById('add-error');
   const serversContainer = document.getElementById('servers-container');
-  const logoutButton = document.getElementById('logout-btn');
+  const checkNowBtn = document.getElementById('check-now-btn');
+  const lastUpdateText = document.getElementById('last-update-text');
   
-  // Logout functionality
-  logoutButton.addEventListener('click', async () => {
+  // Load servers on page load
+  loadServers();
+  
+  // Set up auto-refresh every 10 minutes
+  setInterval(loadServers, 10 * 60 * 1000);
+  
+  // Check now button functionality
+  checkNowBtn.addEventListener('click', async () => {
+    await performManualCheck();
+  });
+
+  // Function to perform manual health check
+  async function performManualCheck() {
     try {
-      logoutButton.disabled = true;
-      logoutButton.textContent = 'Logging out...';
+      // Disable button and show loading state
+      checkNowBtn.disabled = true;
       
-      const response = await fetch('/logout', {
+      // Show checking state in servers container
+      serversContainer.innerHTML = '<div class="loading">Checking servers...</div>';
+      
+      const response = await fetch('/api/check-health', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         }
       });
       
-      if (response.ok) {
-        window.location.href = '/login.html';
-      } else {
-        console.error('Logout failed');
-        logoutButton.disabled = false;
-        logoutButton.textContent = 'Logout';
-      }
-    } catch (error) {
-      console.error('Logout error:', error);
-      logoutButton.disabled = false;
-      logoutButton.textContent = 'Logout';
-    }
-  });
-  
-  // Fixed refresh interval in milliseconds (10 minutes)
-  const refreshInterval = 10 * 60 * 1000;
-  
-  // Settings section has been removed - using fixed 10 minute interval
-
-  // Load servers on page load
-  loadServers();
-  
-  // Set up auto-refresh with fixed 10-minute interval
-  setInterval(loadServers, refreshInterval);
-
-  // Add server form submission
-  serverForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    addErrorElement.textContent = '';
-    
-    const url = serverUrlInput.value.trim();
-    
-    try {
-      // Show loading state on button
-      const submitButton = serverForm.querySelector('button[type="submit"]');
-      const originalText = submitButton.textContent;
-      submitButton.disabled = true;
-      submitButton.textContent = 'Adding...';
-      
-      const response = await fetch('/api/servers', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ url })
-      });
-      
-      const data = await response.json();
-      
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to add server');
+        throw new Error('Failed to check server health');
       }
       
-      // Clear input and reload servers
-      serverUrlInput.value = '';
-      loadServers();
+      const result = await response.json();
+      
+      // Display updated servers
+      displayServers(result.servers);
+      
+      // Update last check time
+      updateLastCheckTime();
       
     } catch (error) {
-      addErrorElement.textContent = error.message;
+      serversContainer.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
     } finally {
-      // Reset button state
-      const submitButton = serverForm.querySelector('button[type="submit"]');
-      submitButton.disabled = false;
-      submitButton.textContent = 'Add Server';
+      // Re-enable button
+      checkNowBtn.disabled = false;
     }
-  });
+  }
 
   // Function to load servers from API
   async function loadServers() {
@@ -99,113 +64,87 @@ document.addEventListener('DOMContentLoaded', () => {
       const servers = await response.json();
       
       displayServers(servers);
+      updateLastCheckTime();
     } catch (error) {
       serversContainer.innerHTML = `<div class="error-message">Error: ${error.message}</div>`;
     }
+  }
+  
+  // Function to update last check time
+  function updateLastCheckTime() {
+    const now = new Date();
+    lastUpdateText.textContent = `Last updated: ${now.toLocaleString()}`;
   }
 
   // Function to display servers in the UI
   function displayServers(servers) {
     if (!servers || servers.length === 0) {
-      serversContainer.innerHTML = '<div class="no-servers">No servers added yet</div>';
+      serversContainer.innerHTML = '<div class="no-servers">No servers configured</div>';
       return;
     }
     
     serversContainer.innerHTML = '';
     
     servers.forEach(server => {
-      const serverElement = document.createElement('div');
+      const serverCard = document.createElement('div');
+      serverCard.className = 'server-card';
       
-      // Determine status class and apply it to the card itself
+      // Determine status class
       let statusClass = 'status-unknown';
+      let statusText = 'Unknown';
+      
       if (server.status === 'healthy') {
         statusClass = 'status-healthy';
+        statusText = 'Healthy';
       } else if (server.status === 'unhealthy') {
         statusClass = 'status-unhealthy';
+        statusText = 'Unhealthy';
       }
-      
-      // Add both server-item class and status class to the container
-      serverElement.className = `server-item ${statusClass}`;
       
       // Format last checked time
       let lastCheckedText = 'Never checked';
       if (server.lastChecked) {
         const date = new Date(server.lastChecked);
-        lastCheckedText = `${date.toLocaleString()}`;
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / (1000 * 60));
+        
+        if (diffMins < 1) {
+          lastCheckedText = 'Just now';
+        } else if (diffMins < 60) {
+          lastCheckedText = `${diffMins} min${diffMins !== 1 ? 's' : ''} ago`;
+        } else if (diffMins < 1440) {
+          const hours = Math.floor(diffMins / 60);
+          lastCheckedText = `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+        } else {
+          lastCheckedText = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        }
       }
       
-      serverElement.innerHTML = `
-        <div class="server-info">
-          <div class="server-status">
-            <span class="status-indicator ${statusClass}"></span>
-            <strong>${server.status.charAt(0).toUpperCase() + server.status.slice(1)}</strong>
-          </div>
-          <a href="${server.url}" target="_blank" class="server-url" title="Open in new tab">${server.url}</a>
-          <div class="last-checked">
-            <span class="last-checked-label">Last checked:</span>
-            <span class="last-checked-time">${lastCheckedText}</span>
+      serverCard.innerHTML = `
+        <div class="server-header">
+          <h3 class="server-name">${escapeHtml(server.name)}</h3>
+          <div class="server-status ${statusClass}">
+            <span class="status-dot"></span>
+            ${statusText}
           </div>
         </div>
-        <div class="server-actions">
-          <button class="remove" data-id="${server.id}" title="Remover servidor">
-            <svg class="trash-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-              <line x1="10" y1="11" x2="10" y2="17"></line>
-              <line x1="14" y1="11" x2="14" y2="17"></line>
-            </svg>
-          </button>
+        <a href="${escapeHtml(server.url)}" target="_blank" class="server-url" title="Open in new tab">
+          ${escapeHtml(server.url)}
+        </a>
+        <div class="server-footer">
+          <span class="last-checked">${lastCheckedText}</span>
         </div>
       `;
       
-      serversContainer.appendChild(serverElement);
-    });
-    
-    // Add event listeners to remove buttons
-    document.querySelectorAll('.remove').forEach(button => {
-      button.addEventListener('click', removeServer);
+      serversContainer.appendChild(serverCard);
     });
   }
 
-  // Function to remove a server
-  async function removeServer(e) {
-    const serverId = e.target.getAttribute('data-id');
-    const button = e.target;
-    
-    try {
-      // Show loading state
-      button.disabled = true;
-      button.innerHTML = '<span>Removendo...</span>';
-      button.style.width = 'auto';
-      button.style.padding = '8px 12px';
-      
-      const response = await fetch(`/api/servers/${serverId}`, {
-        method: 'DELETE'
-      });
-      
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || 'Failed to remove server');
-      }
-      
-      // Reload servers after successful removal
-      loadServers();
-    } catch (error) {
-      alert(`Error: ${error.message}`);
-      // Reset button state on error
-      button.disabled = false;
-      // Reset the button with the trash icon
-      button.innerHTML = `
-        <svg class="trash-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-          <line x1="10" y1="11" x2="10" y2="17"></line>
-          <line x1="14" y1="11" x2="14" y2="17"></line>
-        </svg>
-      `;
-    }
+  // Helper function to escape HTML
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
-
-  // Set up auto-refresh with the configurable interval
-  setInterval(loadServers, refreshInterval);
 });

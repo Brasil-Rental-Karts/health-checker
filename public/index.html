@@ -2,75 +2,39 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#121212">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Server Health Monitor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f8fafc">
+  <title>Health Monitor</title>
   <link rel="stylesheet" href="styles.css">
-  <!-- Favicon links -->
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.webmanifest">
-  <!-- Immediate authentication check - this runs before any content is shown -->
-  <script>
-    (function() {
-      // Hide the content until authentication is verified
-      document.documentElement.style.display = 'none';
-      
-      // Check authentication status immediately
-      fetch('/api/auth/check')
-        .then(response => {
-          if (!response.ok) {
-            // Not authenticated, redirect to login
-            window.location.href = '/login.html';
-          } else {
-            // Authenticated, show the content
-            document.documentElement.style.display = '';
-          }
-        })
-        .catch(error => {
-          // On error, redirect to login as a fallback
-          window.location.href = '/login.html';
-        });
-    })();
-  </script>
 </head>
 <body>
-  <div class="dashboard-container">
-    <header class="dashboard-header">
-      <div class="header-content">
-        <h1>Server Health Monitor</h1>
-        <button id="logout-btn" class="logout-btn">Logout</button>
-      </div>
+  <div class="container">
+    <header class="header">
+      <h1>Health Monitor</h1>
+      <p class="subtitle">Server status monitoring dashboard</p>
     </header>
     
-    <main class="dashboard-main">
-      <section class="add-server">
-        <h2>Add New Server</h2>
-        <form id="add-server-form">
-          <div class="form-group">
-            <input type="url" id="server-url" placeholder="Enter server URL" required>
-            <button type="submit">Add Server</button>
-          </div>
-          <div id="add-error" class="error-message"></div>
-        </form>
-      </section>
-      
-      <!-- Settings section removed - using fixed 10 minute interval -->
-      
-      <section class="server-list">
-        <h2>Monitored Servers</h2>
-        <div id="servers-container">
+    <main class="main">
+      <section class="servers-section">
+        <div class="section-header">
+          <h2>Servers</h2>
+          <button id="check-now-btn" class="check-now-btn">
+            <span class="btn-text">Check Now</span>
+            <span class="btn-loading" style="display: none;">Checking...</span>
+          </button>
+        </div>
+        <div id="servers-container" class="servers-grid">
           <div class="loading">Loading servers...</div>
+        </div>
+        <div class="last-update">
+          <span id="last-update-text">Last updated: Never</span>
         </div>
       </section>
     </main>
-
-    <footer class="dashboard-footer">
-      <p>© 2025 Server Health Monitor</p>
-    </footer>
   </div>
   
   <script src="app.js"></script>
